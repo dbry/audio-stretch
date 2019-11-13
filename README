@@ -1,0 +1,93 @@
+////////////////////////////////////////////////////////////////////////////
+//                        **** AUDIO-STRETCH ****                         //
+//                      Time Domain Harmonic Scaler                       //
+//                    Copyright (c) 2019 David Bryant                     //
+//                          All Rights Reserved.                          //
+//      Distributed under the BSD Software License (see license.txt)      //
+////////////////////////////////////////////////////////////////////////////
+
+From Wikipedia, the free encyclopedia:
+
+    Time-domain harmonic scaling (TDHS) is a method for time-scale
+    modification of speech (or other audio signals), allowing the apparent
+    rate of speech articulation to be changed without affecting the
+    pitch-contour and the time-evolution of the formant structure. TDHS
+    differs from other time-scale modification algorithms in that
+    time-scaling operations are performed in the time domain (not the
+    frequency domain).
+
+This project is an implementation of a TDHS library and a command-line demo
+program to utilize it with standard WAV files.
+
+The vast majority of the time required for TDHS is in the pitch detection,
+and so this library implements two versions. The first is the standard
+one that includes every sample and pitch period, and the second is an
+optimized one that uses pairs of samples and only even pitch periods.
+This second version is about 4X faster than the standard version, but
+provides virtually the same quality. It is used by default for files with
+sample rates of 32 kHz or higher, but its use can be forced on or off
+from the command-line (see options below).
+
+There are two effects possible with TDHS and the audio-stretch demo. The
+first is the more obvious mentioned above of changing the duration (or
+speed) of a speech (or other audio) sample without modifying its pitch.
+The other effect is similar, but after applying the duration change we
+change the samping rate in a complimentary manner to restore the original
+duration and timing, which then results in the pitch being altered.
+
+So when a ratio is supplied to the audio-stretch program, the default
+operation is for the total duration of the audio file to be scaled by
+exactly that ratio (0.5X to 2.0X), with the pitches remaining constant.
+If the option to scale the sample-rate proportionally is specified (-s)
+then the total duration and timing of the audio file will be preserved,
+but the pitches will be scaled by the specified ratio instead. This is
+useful for creating a "helium voice" effect and lots of other fun stuff.
+
+Note that unless ratios of exactly 0.5 or 2.0 are used with the -s option,
+non-standard sampling rates will probably result. Many programs will still
+properly play these files, and audio editing programs will likely import
+them correctly (by resampling), but it is possible that some applications
+will barf on them.
+
+To build the demo app:
+
+    $ gcc -O2 *.c -o audio-stretch
+
+The "help" display from the demo app:
+
+ AUDIO-STRETCH  Time Domain Harmonic Scaling Demo  Version 0.1
+ Copyright (c) 2019 David Bryant. All Rights Reserved.
+
+ Usage:     AUDIO-STRETCH [-options] infile.wav outfile.wav
+
+ Options:  -r<n.n> = stretch ratio (0.5 to 2.0, default = 1.0)
+           -u<n>   = upper freq period limit (default = 333 Hz)
+           -l<n>   = lower freq period limit (default = 55 Hz)
+           -s      = scale rate to preserve duration (not pitch)
+           -f      = fast pitch detection (default >= 32 kHz)
+           -n      = normal pitch detection (default < 32 kHz)
+           -q      = quiet mode (display errors only)
+           -v      = verbose (display lots of info)
+           -y      = overwrite outfile if it exists
+
+ Web:      Visit www.github.com/dbry/audio-stretch for latest version
+
+Notes:
+
+1. The program will handle only mono or stereo files in the WAV format. The
+   audio must be 16-bit PCM and the acceptable sampling rates are from 8,000
+   to 48,000 Hz. Any additional RIFF info in the WAV file will be discarded.
+
+2. For stereo files, the pitch detection is done on a mono conversion of the
+   audio, but the scaling transformation is done on the independent channels.
+   If it is desired to have completely independent processing this can only
+   be done with two mono files. Note that this is not a limitation of the
+   library but of the demo utility (the library has no problem with multiple
+   contexts).
+
+3. This technique (TDHS) is ideal for speech signals, but can also be used
+   for homophonic musical instruments. As the sound becomes increasingly
+   polyphonic, however, the quality and effectiveness will decrease. Also,
+   the period frequency limits provided by default are optimized for speech;
+   adjusting these may be required for best quality with non-speech audio.
+
