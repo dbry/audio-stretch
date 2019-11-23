@@ -19,20 +19,11 @@ From Wikipedia, the free encyclopedia:
 This project is an implementation of a TDHS library and a command-line demo
 program to utilize it with standard WAV files.
 
-The vast majority of the time required for TDHS is in the pitch detection,
-and so this library implements two versions. The first is the standard
-one that includes every sample and pitch period, and the second is an
-optimized one that uses pairs of samples and only even pitch periods.
-This second version is about 4X faster than the standard version, but
-provides virtually the same quality. It is used by default for files with
-sample rates of 32 kHz or higher, but its use can be forced on or off
-from the command-line (see options below).
-
 There are two effects possible with TDHS and the audio-stretch demo. The
 first is the more obvious mentioned above of changing the duration (or
 speed) of a speech (or other audio) sample without modifying its pitch.
 The other effect is similar, but after applying the duration change we
-change the samping rate in a complimentary manner to restore the original
+change the sampling rate in a complimentary manner to restore the original
 duration and timing, which then results in the pitch being altered.
 
 So when a ratio is supplied to the audio-stretch program, the default
@@ -91,3 +82,11 @@ Notes:
    the period frequency limits provided by default are optimized for speech;
    adjusting these may be required for best quality with non-speech audio.
 
+4. The vast majority of the time required for TDHS is in the pitch detection,
+   and so this library implements two versions. The first is the standard
+   one that includes every sample and pitch period, and the second is an
+   optimized one that uses pairs of samples and only even pitch periods.
+   This second version is about 4X faster than the standard version, but
+   provides virtually the same quality. It is used by default for files with
+   sample rates of 32 kHz or higher, but its use can be forced on or off
+   from the command-line (see options above).
