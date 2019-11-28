@@ -40,13 +40,20 @@ properly play these files, and audio editing programs will likely import
 them correctly (by resampling), but it is possible that some applications
 will barf on them.
 
+For version 0.2 a new option was added to cycle through the full possible
+ratio range in a sinusoidal pattern, starting at 1.0, and either going
+up (-c) or down (-cc) first. In this case any specified ratio is ignored
+(except if the -s option is also specified to scale the sampling rate).
+The total period is fixed at 2π seconds, at which point the output will
+again be exactly aligned with the input.
+
 To build the demo app:
 
     $ gcc -O2 *.c -o audio-stretch
 
 The "help" display from the demo app:
 
- AUDIO-STRETCH  Time Domain Harmonic Scaling Demo  Version 0.1
+ AUDIO-STRETCH  Time Domain Harmonic Scaling Demo  Version 0.2
  Copyright (c) 2019 David Bryant. All Rights Reserved.
 
  Usage:     AUDIO-STRETCH [-options] infile.wav outfile.wav
@@ -54,6 +61,8 @@ The "help" display from the demo app:
  Options:  -r<n.n> = stretch ratio (0.5 to 2.0, default = 1.0)
            -u<n>   = upper freq period limit (default = 333 Hz)
            -l<n>   = lower freq period limit (default = 55 Hz)
+           -c      = cycle through all ratios, starting higher
+           -cc     = cycle through all ratios, starting lower
            -s      = scale rate to preserve duration (not pitch)
            -f      = fast pitch detection (default >= 32 kHz)
            -n      = normal pitch detection (default < 32 kHz)
@@ -68,6 +77,7 @@ Notes:
 1. The program will handle only mono or stereo files in the WAV format. The
    audio must be 16-bit PCM and the acceptable sampling rates are from 8,000
    to 48,000 Hz. Any additional RIFF info in the WAV file will be discarded.
+   The command-line program is only for little-endian architectures.
 
 2. For stereo files, the pitch detection is done on a mono conversion of the
    audio, but the scaling transformation is done on the independent channels.

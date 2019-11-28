@@ -14,11 +14,12 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdio.h>
+#include <math.h>
 
 #include "stretch.h"
 
 static const char *sign_on = "\n"
-" AUDIO-STRETCH  Time Domain Harmonic Scaling Demo  Version 0.1\n"
+" AUDIO-STRETCH  Time Domain Harmonic Scaling Demo  Version 0.2\n"
 " Copyright (c) 2019 David Bryant. All Rights Reserved.\n\n";
 
 static const char *usage =
@@ -26,6 +27,8 @@ static const char *usage =
 " Options:  -r<n.n> = stretch ratio (0.5 to 2.0, default = 1.0)\n"
 "           -u<n>   = upper freq period limit (default = 333 Hz)\n"
 "           -l<n>   = lower freq period limit (default = 55 Hz)\n"
+"           -c      = cycle through all ratios, starting higher\n"
+"           -cc     = cycle through all ratios, starting lower\n"
 "           -s      = scale rate to preserve duration (not pitch)\n"
 "           -f      = fast pitch detection (default >= 32 kHz)\n"
 "           -n      = normal pitch detection (default < 32 kHz)\n"
@@ -71,7 +74,7 @@ static int verbose_mode, quiet_mode;
 
 int main (argc, argv) int argc; char **argv;
 {
-    int asked_help = 0, overwrite = 0, scale_rate = 0, force_fast = 0, force_normal = 0, fast_mode, scaled_rate;
+    int asked_help = 0, overwrite = 0, scale_rate = 0, force_fast = 0, force_normal = 0, cycle_ratio = 0;
     int upper_frequency = 333, lower_frequency = 55, min_period, max_period;
     int samples_to_process, insamples = 0, outsamples = 0;
     char *infilename = NULL, *outfilename = NULL;
@@ -128,6 +131,10 @@ int main (argc, argv) int argc; char **argv;
 
                     case 'S': case 's':
                         scale_rate = 1;
+                        break;
+
+                    case 'C': case 'c':
+                        cycle_ratio++;
                         break;
 
                     case 'F': case 'f':
@@ -301,14 +308,17 @@ int main (argc, argv) int argc; char **argv;
 
     min_period = WaveHeader.SampleRate / upper_frequency;
     max_period = WaveHeader.SampleRate / lower_frequency;
-    fast_mode = (force_fast || WaveHeader.SampleRate >= 32000) && !force_normal;
+    int fast_mode = (force_fast || WaveHeader.SampleRate >= 32000) && !force_normal;
 
     if (verbose_mode)
         fprintf (stderr, "initializing stretch library with period range = %d to %d, %d channels, %s\n",
             min_period, max_period, WaveHeader.NumChannels, fast_mode ? "fast mode" : "normal mode");
 
-    if (!quiet_mode && ratio == 1.0)
+    if (!quiet_mode && ratio == 1.0 && !cycle_ratio)
         fprintf (stderr, "warning: a ratio of 1.0 will do nothing but copy the WAV file!\n");
+
+    if (!quiet_mode && ratio != 1.0 && cycle_ratio && !scale_rate)
+        fprintf (stderr, "warning: specifying ratio with cycling doesn't do anything (unless scaling rate)\n");
 
     stretcher = stretch_init (min_period, max_period, WaveHeader.NumChannels, fast_mode);
 
@@ -324,11 +334,11 @@ int main (argc, argv) int argc; char **argv;
         return 1;
     }
 
-    scaled_rate = scale_rate ? (int)(WaveHeader.SampleRate * ratio + 0.5) : WaveHeader.SampleRate;
+    int scaled_rate = scale_rate ? (int)(WaveHeader.SampleRate * ratio + 0.5) : WaveHeader.SampleRate;
     write_pcm_wav_header (outfile, 0, WaveHeader.NumChannels, 2, scaled_rate);
 
     short *inbuffer = malloc (BUFFER_SAMPLES * WaveHeader.BlockAlign);
-    short *outbuffer = malloc ((BUFFER_SAMPLES * 2 + 2048) * WaveHeader.BlockAlign);
+    short *outbuffer = malloc ((BUFFER_SAMPLES * 2 + max_period * 3) * WaveHeader.BlockAlign);
 
     while (1) {
         int samples_read = fread (inbuffer, WaveHeader.BlockAlign,
@@ -337,6 +347,9 @@ int main (argc, argv) int argc; char **argv;
 
         insamples += samples_read;
         samples_to_process -= samples_read;
+
+        if (cycle_ratio)
+            ratio = (sin ((double) outsamples / WaveHeader.SampleRate) * (cycle_ratio & 1 ? 0.75 : -0.75)) + 1.25;
 
         if (samples_read)
             samples_generated = stretch_samples (stretcher, inbuffer, samples_read, outbuffer, ratio);
