@@ -27,8 +27,9 @@
 #define MAX_PERIOD  1024        /* maximum allowable pitch period */
 
 struct stretch_cnxt {
-    int num_chans, inbuff_samples, shortest, longest, tail, head, verbatim, fast_mode;
+    int num_chans, inbuff_samples, shortest, longest, tail, head, fast_mode;
     short *inbuff, *calcbuff;
+    float outsamples_error;
     unsigned int *results;
 };
 
@@ -54,7 +55,7 @@ StretchHandle stretch_init (int shortest_period, int longest_period, int num_cha
     }
 
     if (longest_period <= shortest_period || shortest_period < MIN_PERIOD || longest_period > MAX_PERIOD) {
-        printf ("stretch_init(): invalid periods!\n");
+        fprintf (stderr, "stretch_init(): invalid periods!\n");
         return NULL;
     }
 
@@ -86,7 +87,7 @@ StretchHandle stretch_init (int shortest_period, int longest_period, int num_cha
  * both channels in stereo and can be as large as desired (samples are buffered
  * here). The exact number of samples output is not possible to determine in
  * advance, but it will be close to the number of input samples times the ratio
- * plus or minus a couple of the longest periods.
+ * plus or minus 3X the longest period.
  */
 
 int stretch_samples (StretchHandle handle, short *samples, int num_samples, short *output, float ratio)
@@ -120,54 +121,59 @@ int stretch_samples (StretchHandle handle, short *samples, int num_samples, shor
 
         /* while there are enough samples to process, do so */
 
-        while (1) {
-            if (cnxt->verbatim && cnxt->head > cnxt->tail) {
-                int samples_to_copy = cnxt->verbatim;
-                if (samples_to_copy > cnxt->head - cnxt->tail)
-                    samples_to_copy = cnxt->head - cnxt->tail;
+        while (cnxt->tail >= cnxt->longest && cnxt->head - cnxt->tail >= cnxt->longest * 2) {
+            int period = cnxt->fast_mode ? find_period_fast (cnxt, cnxt->inbuff + cnxt->tail) :
+                find_period (cnxt, cnxt->inbuff + cnxt->tail);
+            float process_ratio;
 
-                memcpy (output + out_samples, cnxt->inbuff + cnxt->tail, samples_to_copy * sizeof (cnxt->inbuff [0]));
-                out_samples += samples_to_copy;
-                cnxt->verbatim -= samples_to_copy;
-                cnxt->tail += samples_to_copy;
+            /*
+             * Once we have calculated the best-match period, there are 4 possible transformations
+             * available to convert the input samples to output samples. Obviously we can simply
+             * copy the samples verbatim (1:1). Standard TDHS provides algorithms for 2:1 and
+             * 1:2 scaling, and I have created an obvious extension for 2:3 scaling. To achieve
+             * intermediate ratios we maintain a "error" term (in samples) and use that here to
+             * calculate the actual transformation to apply.
+             */
+
+            if (cnxt->outsamples_error == 0.0)
+                process_ratio = floor (ratio * 2.0 + 0.5) / 2.0;
+            else if (cnxt->outsamples_error > 0.0)
+                process_ratio = floor (ratio * 2.0) / 2.0;
+            else
+                process_ratio = ceil (ratio * 2.0) / 2.0;
+
+            if (process_ratio == 0.5) {
+                merge_blocks (output + out_samples, cnxt->inbuff + cnxt->tail,
+                    cnxt->inbuff + cnxt->tail + period, period);
+                cnxt->outsamples_error += period - (period * 2.0 * ratio);
+                out_samples += period;
+                cnxt->tail += period * 2;
             }
-            else if (cnxt->tail >= cnxt->longest && cnxt->head - cnxt->tail >= cnxt->longest * 2) {
-                if (ratio == 1.0) {
-                    memcpy (output + out_samples, cnxt->inbuff + cnxt->tail,
-                        cnxt->longest * 2 * sizeof (cnxt->inbuff [0]));
+            else if (process_ratio == 1.0) {
+                memcpy (output + out_samples, cnxt->inbuff + cnxt->tail, period * 2 * sizeof (cnxt->inbuff [0]));
+                cnxt->outsamples_error += (period * 2.0) - (period * 2.0 * ratio);
+                out_samples += period * 2;
+                cnxt->tail += period * 2;
+            }
+            else if (process_ratio == 1.5) {
+                memcpy (output + out_samples, cnxt->inbuff + cnxt->tail, period * sizeof (cnxt->inbuff [0]));
+                merge_blocks (output + out_samples + period, cnxt->inbuff + cnxt->tail + period,
+                    cnxt->inbuff + cnxt->tail, period);
+                memcpy (output + out_samples + period * 2, cnxt->inbuff + cnxt->tail + period, period * sizeof (cnxt->inbuff [0]));
+                cnxt->outsamples_error += (period * 3.0) - (period * 2.0 * ratio);
+                out_samples += period * 3;
+                cnxt->tail += period * 2;
+            }
+            else if (process_ratio == 2.0) {
+                merge_blocks (output + out_samples, cnxt->inbuff + cnxt->tail,
+                    cnxt->inbuff + cnxt->tail - period, period * 2);
 
-                    out_samples += cnxt->longest * 2;
-                    cnxt->tail += cnxt->longest * 2;
-                }
-                else {
-                    int period = cnxt->fast_mode ? find_period_fast (cnxt, cnxt->inbuff + cnxt->tail) : 
-                        find_period (cnxt, cnxt->inbuff + cnxt->tail), incnt, outcnt;
-
-                    if (ratio < 1.0) {
-                        merge_blocks (output + out_samples, cnxt->inbuff + cnxt->tail,
-                            cnxt->inbuff + cnxt->tail + period, period); 
-
-                        out_samples += period;
-                        cnxt->tail += period * 2;
-                        incnt = (outcnt = period) * 2;
-                    }
-                    else {
-                        merge_blocks (output + out_samples, cnxt->inbuff + cnxt->tail,
-                            cnxt->inbuff + cnxt->tail - period, period * 2);
-
-                        out_samples += period * 2;
-                        cnxt->tail += period;
-                        outcnt = (incnt = period) * 2;
-                    }
-
-                    cnxt->verbatim = (int) floor (((ratio * incnt) - outcnt) / (1.0 - ratio) / cnxt->num_chans + 0.5) * cnxt->num_chans;
-
-                    if (cnxt->verbatim < 0)     // this should not happen...
-                        cnxt->verbatim = 0;
-                }
+                cnxt->outsamples_error += (period * 2.0) - (period * ratio);
+                out_samples += period * 2;
+                cnxt->tail += period;
             }
             else
-                break;
+                fprintf (stderr, "stretch_samples: fatal programming error: process_ratio == %g\n", process_ratio);
         }
 
         /* if we're almost done with buffer, copy the rest back to beginning */
