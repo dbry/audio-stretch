@@ -25,8 +25,9 @@ extern "C" {
 typedef void *StretchHandle;
 
 StretchHandle stretch_init (int shortest_period, int longest_period, int num_chans, int fast_mode);
-int stretch_samples (StretchHandle handle, short *samples, int num_samples, short *output, float ratio);
+int stretch_samples (StretchHandle handle, const short *samples, int num_samples, short *output, float ratio);
 int stretch_flush (StretchHandle handle, short *output);
+void stretch_reset (StretchHandle handle);
 void stretch_deinit (StretchHandle handle);
 
 #ifdef __cplusplus

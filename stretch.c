@@ -82,6 +82,18 @@ StretchHandle stretch_init (int shortest_period, int longest_period, int num_cha
 }
 
 /*
+ * Re-Initialize a context of the time stretching code - as if freshly created
+ * with stretch_init(). This drops all internal state.
+ */
+
+void stretch_reset (StretchHandle handle)
+{
+  struct stretch_cnxt *cnxt = (struct stretch_cnxt *) handle;
+  cnxt->head = cnxt->tail = cnxt->longest;
+}
+
+
+/*
  * Process the specified samples with the given ratio (which is clipped to the
  * range 0.5 to 2.0). Note that the number of samples refers to total samples for
  * both channels in stereo and can be as large as desired (samples are buffered
@@ -90,7 +102,7 @@ StretchHandle stretch_init (int shortest_period, int longest_period, int num_cha
  * plus or minus 3X the longest period.
  */
 
-int stretch_samples (StretchHandle handle, short *samples, int num_samples, short *output, float ratio)
+int stretch_samples (StretchHandle handle, const short *samples, int num_samples, short *output, float ratio)
 {
     struct stretch_cnxt *cnxt = (struct stretch_cnxt *) handle;
     int out_samples = 0;
