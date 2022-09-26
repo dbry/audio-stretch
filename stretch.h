@@ -22,11 +22,15 @@
 extern "C" {
 #endif
 
+#include <stdint.h>
+
 typedef void *StretchHandle;
 
+typedef int16_t  stretch_sample_t;      /* input and output sample type */
+
 StretchHandle stretch_init (int shortest_period, int longest_period, int num_chans, int fast_mode);
-int stretch_samples (StretchHandle handle, const short *samples, int num_samples, short *output, float ratio);
-int stretch_flush (StretchHandle handle, short *output);
+int stretch_samples (StretchHandle handle, const stretch_sample_t *samples, int num_samples, stretch_sample_t *output, float ratio);
+int stretch_flush (StretchHandle handle, stretch_sample_t *output);
 void stretch_reset (StretchHandle handle);
 void stretch_deinit (StretchHandle handle);
 
