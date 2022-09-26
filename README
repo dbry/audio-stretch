@@ -49,7 +49,7 @@ again be exactly aligned with the input.
 
 To build the demo app:
 
-    $ gcc -O2 *.c -o audio-stretch
+    $ gcc -O2 *.c -lm -o audio-stretch
 
 The "help" display from the demo app:
 
