@@ -402,13 +402,13 @@ static int write_pcm_wav_header (FILE *outfile, size_t num_samples, int num_chan
     wavhdr.BlockAlign = bytes_per_sample * num_channels;
     wavhdr.BitsPerSample = bytes_per_sample * 8;
 
-    strncpy (riffhdr.ckID, "RIFF", sizeof (riffhdr.ckID));
-    strncpy (riffhdr.formType, "WAVE", sizeof (riffhdr.formType));
+    memcpy (riffhdr.ckID, "RIFF", sizeof (riffhdr.ckID));
+    memcpy (riffhdr.formType, "WAVE", sizeof (riffhdr.formType));
     riffhdr.ckSize = sizeof (riffhdr) + wavhdrsize + sizeof (datahdr) + total_data_bytes;
-    strncpy (fmthdr.ckID, "fmt ", sizeof (fmthdr.ckID));
+    memcpy (fmthdr.ckID, "fmt ", sizeof (fmthdr.ckID));
     fmthdr.ckSize = wavhdrsize;
 
-    strncpy (datahdr.ckID, "data", sizeof (datahdr.ckID));
+    memcpy (datahdr.ckID, "data", sizeof (datahdr.ckID));
     datahdr.ckSize = total_data_bytes;
 
     return fwrite (&riffhdr, sizeof (riffhdr), 1, outfile) &&

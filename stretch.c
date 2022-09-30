@@ -24,7 +24,7 @@
 #include "stretch.h"
 
 #define MIN_PERIOD  24          /* minimum allowable pitch period */
-#define MAX_PERIOD  1024        /* maximum allowable pitch period */
+#define MAX_PERIOD  2400        /* maximum allowable pitch period */
 
 struct stretch_cnxt {
     int num_chans, inbuff_samples, shortest, longest, tail, head, fast_mode;
@@ -247,19 +247,31 @@ void stretch_deinit (StretchHandle handle)
 
 static int find_period (struct stretch_cnxt *cnxt, short *samples)
 {
-    unsigned int sum, diff, factor, best_factor = 0;
+    unsigned int sum, diff, factor, scaler, best_factor = 0;
     short *calcbuff = samples;
     int period, best_period;
     int i, j;
 
     period = best_period = cnxt->shortest / cnxt->num_chans;
 
+    // convert stereo to mono, and accumulate sum for longest period
+
     if (cnxt->num_chans == 2) {
         calcbuff = cnxt->calcbuff;
 
-        for (i = j = 0; i < cnxt->longest * 2; i += 2)
-            calcbuff [j++] = (samples [i] + samples [i+1]) >> 1;
+        for (sum = i = j = 0; i < cnxt->longest * 2; i += 2)
+            sum += abs (calcbuff [j++] = (samples [i] + samples [i+1]) >> 1);
     }
+    else
+        for (sum = i = 0; i < cnxt->longest; ++i)
+            sum += abs (calcbuff [i]) + abs (calcbuff [i+cnxt->longest]);
+
+    // if silence return longest period, else calculate scaler based on largest sum
+
+    if (sum)
+        scaler = (UINT32_MAX - 1) / sum;
+    else
+        return cnxt->longest;
 
     /* accumulate sum for shortest period size */
 
@@ -283,11 +295,10 @@ static int find_period (struct stretch_cnxt *cnxt, short *samples)
          * Here we calculate and store the resulting correlation
          * factor.  Note that we must watch for a difference of
          * zero, meaning a perfect match.  Also, for increased
-         * precision using integer math, we scale the sum.  Care
-         * must be taken here to avoid possibility of overflow.
+         * precision using integer math, we scale the sum.
          */
 
-        factor = diff ? (sum * 128) / diff : UINT32_MAX;
+        factor = diff ? (sum * scaler) / diff : UINT32_MAX;
 
         if (factor >= best_factor) {
             best_factor = factor;
@@ -302,7 +313,8 @@ static int find_period (struct stretch_cnxt *cnxt, short *samples)
         /* update accumulating sum and current period */
 
         sum += abs (calcbuff [period * 2]);
-        sum += abs (calcbuff [period++ * 2 + 1]);
+        sum += abs (calcbuff [period * 2 + 1]);
+        period++;
     }
 
     return best_period * cnxt->num_chans;
@@ -320,20 +332,27 @@ static int find_period (struct stretch_cnxt *cnxt, short *samples)
 
 static int find_period_fast (struct stretch_cnxt *cnxt, short *samples)
 {
-    unsigned int sum, diff, best_factor = 0;
+    unsigned int sum, diff, scaler, best_factor = 0;
     int period, best_period;
     int i, j;
 
     best_period = period = cnxt->shortest / (cnxt->num_chans * 2);
 
-    /* first step is compressing data 2:1 into calcbuff */
+    /* first step is compressing data 2:1 into calcbuff, and calculating maximum sum */
 
     if (cnxt->num_chans == 2)
-        for (i = j = 0; i < cnxt->longest * 2; i += 4)
-            cnxt->calcbuff [j++] = (samples [i] + samples [i+1] + samples [i+2] + samples [i+3]) >> 2;
+        for (sum = i = j = 0; i < cnxt->longest * 2; i += 4)
+            sum += abs (cnxt->calcbuff [j++] = (samples [i] + samples [i+1] + samples [i+2] + samples [i+3]) >> 2);
     else
-        for (i = j = 0; i < cnxt->longest * 2; i += 2)
-            cnxt->calcbuff [j++] = (samples [i] + samples [i+1]) >> 1;
+        for (sum = i = j = 0; i < cnxt->longest * 2; i += 2)
+            sum += abs (cnxt->calcbuff [j++] = (samples [i] + samples [i+1]) >> 1);
+
+    // if silence return longest period, else calculate scaler based on largest sum
+
+    if (sum)
+        scaler = (UINT32_MAX - 1) / sum;
+    else
+        return cnxt->longest;
 
     /* accumulate sum for shortest period */
 
@@ -357,11 +376,10 @@ static int find_period_fast (struct stretch_cnxt *cnxt, short *samples)
          * Here we calculate and store the resulting correlation
          * factor.  Note that we must watch for a difference of
          * zero, meaning a perfect match.  Also, for increased
-         * precision using integer math, we scale the sum.  Care
-         * must be taken here to avoid possibility of overflow.
+         * precision using integer math, we scale the sum.
          */
 
-        cnxt->results [period] = diff ? (sum * 128) / diff : UINT32_MAX;
+        cnxt->results [period] = diff ? (sum * scaler) / diff : UINT32_MAX;
 
         if (cnxt->results [period] >= best_factor) {    /* check if best yet */
             best_factor = cnxt->results [period];
@@ -376,7 +394,8 @@ static int find_period_fast (struct stretch_cnxt *cnxt, short *samples)
         /* update accumulating sum and current period */
 
         sum += abs (cnxt->calcbuff [period * 2]);
-        sum += abs (cnxt->calcbuff [period++ * 2 + 1]);
+        sum += abs (cnxt->calcbuff [period * 2 + 1]);
+        period++;
     }
 
     if (best_period * cnxt->num_chans * 2 != cnxt->shortest && best_period * cnxt->num_chans * 2 != cnxt->longest) {
