@@ -399,12 +399,12 @@ static int find_period_fast (struct stretch_cnxt *cnxt, short *samples)
     }
 
     if (best_period * cnxt->num_chans * 2 != cnxt->shortest && best_period * cnxt->num_chans * 2 != cnxt->longest) {
-        int high_side_diff = cnxt->results [best_period] - cnxt->results [best_period+1];
-        int low_side_diff = cnxt->results [best_period] - cnxt->results [best_period-1];
+        unsigned int high_side_diff = cnxt->results [best_period] - cnxt->results [best_period+1];
+        unsigned int low_side_diff = cnxt->results [best_period] - cnxt->results [best_period-1];
 
-        if (low_side_diff > high_side_diff * 2)
+        if (low_side_diff / 2 > high_side_diff)
             best_period = best_period * 2 + 1;
-        else if (high_side_diff > low_side_diff * 2)
+        else if (high_side_diff / 2 > low_side_diff)
             best_period = best_period * 2 - 1;
         else
             best_period *= 2;
@@ -425,6 +425,11 @@ static int find_period_fast (struct stretch_cnxt *cnxt, short *samples)
  * back to signed.  This is done to avoid the compression around zero that occurs
  * with calculations of this type on C implementations that round division toward
  * zero.
+ *
+ * The maximum period handled here without overflow possibility is 65535 samples.
+ * This corresponds to a maximum calculated period of 16383 samples (2x for stereo
+ * and 2x for the "2.0" version of the stretch algorithm). Since the maximum
+ * calculated period is currently set for 2400 samples, we have plenty of margin.
  */
 
 static void merge_blocks (short *output, short *input1, short *input2, int samples)
@@ -432,7 +437,6 @@ static void merge_blocks (short *output, short *input1, short *input2, int sampl
     int i;
 
     for (i = 0; i < samples; ++i)
-        output [i] = (((input1 [i] + 32768) * (samples - i) +
-            (input2 [i] + 32768) * i) / samples) - 32768;
+        output [i] = (int)(((unsigned int)(input1 [i] + 32768) * (samples - i) +
+            (unsigned int)(input2 [i] + 32768) * i) / samples) - 32768;
 }
-
