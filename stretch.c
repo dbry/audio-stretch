@@ -98,8 +98,8 @@ void stretch_reset (StretchHandle handle)
  * range 0.5 to 2.0). Note that the number of samples refers to total samples for
  * both channels in stereo and can be as large as desired (samples are buffered
  * here). The exact number of samples output is not possible to determine in
- * advance, but it will be close to the number of input samples times the ratio
- * plus or minus 3X the longest period.
+ * advance, but the maximum will be the number of input samples times the ratio
+ * plus 3X the longest period (or 4X the longest period in "fast" mode).
  */
 
 int stretch_samples (StretchHandle handle, const short *samples, int num_samples, short *output, float ratio)
@@ -133,7 +133,7 @@ int stretch_samples (StretchHandle handle, const short *samples, int num_samples
 
         /* while there are enough samples to process, do so */
 
-        while (cnxt->tail >= cnxt->longest && cnxt->head - cnxt->tail >= cnxt->longest * 2) {
+        while (cnxt->tail >= cnxt->longest && cnxt->head - cnxt->tail >= cnxt->longest * (cnxt->fast_mode ? 3 : 2)) {
             int period = cnxt->fast_mode ? find_period_fast (cnxt, cnxt->inbuff + cnxt->tail) :
                 find_period (cnxt, cnxt->inbuff + cnxt->tail);
             float process_ratio;
@@ -183,6 +183,15 @@ int stretch_samples (StretchHandle handle, const short *samples, int num_samples
                 cnxt->outsamples_error += (period * 2.0) - (period * ratio);
                 out_samples += period * 2;
                 cnxt->tail += period;
+
+                if (cnxt->fast_mode) {
+                    merge_blocks (output + out_samples, cnxt->inbuff + cnxt->tail,
+                        cnxt->inbuff + cnxt->tail - period, period * 2);
+
+                    cnxt->outsamples_error += (period * 2.0) - (period * ratio);
+                    out_samples += period * 2;
+                    cnxt->tail += period;
+                }
             }
             else
                 fprintf (stderr, "stretch_samples: fatal programming error: process_ratio == %g\n", process_ratio);

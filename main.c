@@ -338,7 +338,7 @@ int main (argc, argv) int argc; char **argv;
     write_pcm_wav_header (outfile, 0, WaveHeader.NumChannels, 2, scaled_rate);
 
     short *inbuffer = malloc (BUFFER_SAMPLES * WaveHeader.BlockAlign);
-    short *outbuffer = malloc ((BUFFER_SAMPLES * 2 + max_period * 3) * WaveHeader.BlockAlign);
+    short *outbuffer = malloc ((BUFFER_SAMPLES * 2 + max_period * 4) * WaveHeader.BlockAlign);
 
     while (1) {
         int samples_read = fread (inbuffer, WaveHeader.BlockAlign,
