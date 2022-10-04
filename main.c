@@ -27,6 +27,8 @@ static const char *usage =
 " Options:  -r<n.n> = stretch ratio (0.5 to 2.0, default = 1.0)\n"
 "           -u<n>   = upper freq period limit (default = 333 Hz)\n"
 "           -l<n>   = lower freq period limit (default = 55 Hz)\n"
+"           -b<n>   = benchmark repeating the input n times\n"
+"                     output file is not written in benchmark mode\n"
 "           -c      = cycle through all ratios, starting higher\n"
 "           -cc     = cycle through all ratios, starting lower\n"
 "           -s      = scale rate to preserve duration (not pitch)\n"
@@ -77,6 +79,7 @@ int main (argc, argv) int argc; char **argv;
     int asked_help = 0, overwrite = 0, scale_rate = 0, force_fast = 0, force_normal = 0, cycle_ratio = 0;
     int upper_frequency = 333, lower_frequency = 55, min_period, max_period;
     int samples_to_process, insamples = 0, outsamples = 0;
+    int benchmark_rep = 0;
     char *infilename = NULL, *outfilename = NULL;
     RiffChunkHeader riff_chunk_header;
     WaveHeader WaveHeader = { 0 };
@@ -112,6 +115,17 @@ int main (argc, argv) int argc; char **argv;
 
                         if (lower_frequency < 20) {
                             fprintf (stderr, "\nlower frequency must be at least 20 Hz!\n");
+                            return -1;
+                        }
+
+                        --*argv;
+                        break;
+
+                    case 'B': case 'b':
+                        benchmark_rep = strtol (++*argv, argv, 10);
+
+                        if (benchmark_rep < 1) {
+                            fprintf (stderr, "\nbenchmark mode's repetition count must be at least 1!\n");
                             return -1;
                         }
 
@@ -178,17 +192,17 @@ int main (argc, argv) int argc; char **argv;
     if (!quiet_mode)
         fprintf (stderr, "%s", sign_on);
 
-    if (!outfilename || asked_help) {
+    if ( (!outfilename && !benchmark_rep) || asked_help) {
         printf ("%s", usage);
         return 0;
     }
 
-    if (!strcmp (infilename, outfilename)) {
+    if (!benchmark_rep && !strcmp (infilename, outfilename)) {
         fprintf (stderr, "can't overwrite input file (specify different/new output file name)\n");
         return -1;
     }
 
-    if (!overwrite && (outfile = fopen (outfilename, "r"))) {
+    if (!benchmark_rep && !overwrite && (outfile = fopen (outfilename, "r"))) {
         fclose (outfile);
         fprintf (stderr, "output file \"%s\" exists (use -y to overwrite)\n", outfilename);
         return -1;
@@ -328,41 +342,91 @@ int main (argc, argv) int argc; char **argv;
         return 1;
     }
 
-    if (!(outfile = fopen (outfilename, "wb"))) {
+    if (!benchmark_rep && !(outfile = fopen (outfilename, "wb"))) {
         fprintf (stderr, "can't open file \"%s\" for writing!\n", outfilename);
         fclose (infile);
         return 1;
     }
 
     int scaled_rate = scale_rate ? (int)(WaveHeader.SampleRate * ratio + 0.5) : WaveHeader.SampleRate;
-    write_pcm_wav_header (outfile, 0, WaveHeader.NumChannels, 2, scaled_rate);
+    if (!benchmark_rep)
+        write_pcm_wav_header (outfile, 0, WaveHeader.NumChannels, 2, scaled_rate);
 
-    short *inbuffer = malloc (BUFFER_SAMPLES * WaveHeader.BlockAlign);
+    short *inbuffer = NULL;
     short *outbuffer = malloc ((BUFFER_SAMPLES * 2 + max_period * 4) * WaveHeader.BlockAlign);
 
-    while (1) {
-        int samples_read = fread (inbuffer, WaveHeader.BlockAlign,
-            samples_to_process >= BUFFER_SAMPLES ? BUFFER_SAMPLES : samples_to_process, infile);
-        int samples_generated;
+    if (!benchmark_rep) {
 
-        insamples += samples_read;
-        samples_to_process -= samples_read;
+        inbuffer = malloc (BUFFER_SAMPLES * WaveHeader.BlockAlign);
 
-        if (cycle_ratio)
-            ratio = (sin ((double) outsamples / WaveHeader.SampleRate) * (cycle_ratio & 1 ? 0.75 : -0.75)) + 1.25;
+        while (1) {
+            int samples_read = fread (inbuffer, WaveHeader.BlockAlign,
+                samples_to_process >= BUFFER_SAMPLES ? BUFFER_SAMPLES : samples_to_process, infile);
+            int samples_generated;
 
-        if (samples_read)
-            samples_generated = stretch_samples (stretcher, inbuffer, samples_read, outbuffer, ratio);
-        else
-            samples_generated = stretch_flush (stretcher, outbuffer);
+            insamples += samples_read;
+            samples_to_process -= samples_read;
 
-        if (samples_generated) {
-            fwrite (outbuffer, WaveHeader.BlockAlign, samples_generated, outfile);
-            outsamples += samples_generated;
+            if (cycle_ratio)
+                ratio = (sin ((double) outsamples / WaveHeader.SampleRate) * (cycle_ratio & 1 ? 0.75 : -0.75)) + 1.25;
+
+            if (samples_read)
+                samples_generated = stretch_samples (stretcher, inbuffer, samples_read, outbuffer, ratio);
+            else
+                samples_generated = stretch_flush (stretcher, outbuffer);
+
+            if (samples_generated) {
+                if (!benchmark_rep)
+                    fwrite (outbuffer, WaveHeader.BlockAlign, samples_generated, outfile);
+                outsamples += samples_generated;
+            }
+
+            if (!samples_read && !samples_generated)
+                break;
+        }
+    }
+    else {
+
+        unsigned prevent_optimization = 0;
+        int total_input_samples = samples_to_process;
+
+        inbuffer = malloc (samples_to_process * WaveHeader.BlockAlign);
+
+        total_input_samples = fread (inbuffer, WaveHeader.BlockAlign, samples_to_process, infile);
+
+        for ( int rep = 0; rep < benchmark_rep; ++rep ) {
+
+            int input_offset = 0;
+            samples_to_process = total_input_samples;
+
+            while (1) {
+
+                int samples_read = samples_to_process >= BUFFER_SAMPLES ? BUFFER_SAMPLES : samples_to_process;
+                int samples_generated;
+
+                samples_to_process -= samples_read;
+
+                if (cycle_ratio)
+                    ratio = (sin ((double) outsamples / WaveHeader.SampleRate) * (cycle_ratio & 1 ? 0.75 : -0.75)) + 1.25;
+
+                if (samples_read)
+                    samples_generated = stretch_samples (stretcher, inbuffer + input_offset, samples_read, outbuffer, ratio);
+                else
+                    samples_generated = stretch_flush (stretcher, outbuffer);
+
+                input_offset += samples_read * WaveHeader.NumChannels;
+                outsamples += samples_generated;
+                prevent_optimization ^= outbuffer[0];
+
+                if (!samples_read && !samples_generated)
+                    break;
+            }
+
+            if (verbose_mode)
+                fprintf (stderr, "loop %d finished (0x%04x)\n", rep+1, prevent_optimization);
+
         }
 
-        if (!samples_read && !samples_generated)
-            break;
     }
 
     free (inbuffer);
@@ -371,9 +435,11 @@ int main (argc, argv) int argc; char **argv;
 
     fclose (infile);
 
-    rewind (outfile);
-    write_pcm_wav_header (outfile, outsamples, WaveHeader.NumChannels, 2, scaled_rate);
-    fclose (outfile);
+    if (!benchmark_rep) {
+        rewind (outfile);
+        write_pcm_wav_header (outfile, outsamples, WaveHeader.NumChannels, 2, scaled_rate);
+        fclose (outfile);
+    }
 
     if (insamples && verbose_mode) {
         fprintf (stderr, "done, %d samples --> %d samples (ratio = %.3f)\n", insamples, outsamples, (float) outsamples / insamples);

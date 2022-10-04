@@ -61,6 +61,8 @@ The "help" display from the demo app:
  Options:  -r<n.n> = stretch ratio (0.5 to 2.0, default = 1.0)
            -u<n>   = upper freq period limit (default = 333 Hz)
            -l<n>   = lower freq period limit (default = 55 Hz)
+           -b<n>   = benchmark repeating the input n times
+                     output file is not written in benchmark mode
            -c      = cycle through all ratios, starting higher
            -cc     = cycle through all ratios, starting lower
            -s      = scale rate to preserve duration (not pitch)
