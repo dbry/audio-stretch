@@ -74,7 +74,8 @@ The "help" display from the demo app:
 
 Notes:
 
-1. The program will handle only mono or stereo files in the WAV format. The
+1. The program will handle only mono or stereo files in the WAV format. In
+   case of stereo, the two channels shouldn't be independent. The
    audio must be 16-bit PCM and the acceptable sampling rates are from 8,000
    to 48,000 Hz. Any additional RIFF info in the WAV file will be discarded.
    The command-line program is only for little-endian architectures.

@@ -14,6 +14,13 @@
 // to stretch the timing of a 16-bit PCM signal (either mono or stereo) from
 // 1/2 to 2 times its original length. This is done without altering any of
 // its tonal characteristics.
+//
+// Use stereo (num_chans = 2), when both channels are from same source
+// and should contain approximately similar content.
+// For independent channels, prefer using multiple StretchHandle-instances.
+// see https://github.com/dbry/audio-stretch/issues/6
+// Multiple instances, of course, wil consume more CPU load.
+// In addition, different output amounts need to be handled.
 
 #ifndef STRETCH_H
 #define STRETCH_H
