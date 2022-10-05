@@ -1,0 +1,10 @@
+These are two, 60 second samples for exercising the stretch algorithms. They are
+encoded with the WavPack lossless codec, so they'll need to be converted back to
+Microsoft WAV files to be used. One is mono, and the other is a stereo version
+of the first, but with one channel delayed 1/2 sample.
+
+These are not speech samples, but are artificially generated test signals. They
+consist of a warbling tone (between 75 and 1500 Hz) and varying levels of noise.
+They are also generated at a high level (in some places clipping) to verify the
+proper operation of the stretch code with edge-case values.
+
