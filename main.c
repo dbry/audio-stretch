@@ -1,7 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////
 //                        **** AUDIO-STRETCH ****                         //
 //                      Time Domain Harmonic Scaler                       //
-//                    Copyright (c) 2019 David Bryant                     //
+//                    Copyright (c) 2022 David Bryant                     //
 //                          All Rights Reserved.                          //
 //      Distributed under the BSD Software License (see license.txt)      //
 ////////////////////////////////////////////////////////////////////////////
@@ -19,8 +19,8 @@
 #include "stretch.h"
 
 static const char *sign_on = "\n"
-" AUDIO-STRETCH  Time Domain Harmonic Scaling Demo  Version 0.2\n"
-" Copyright (c) 2019 David Bryant. All Rights Reserved.\n\n";
+" AUDIO-STRETCH  Time Domain Harmonic Scaling Demo  Version 0.3\n"
+" Copyright (c) 2022 David Bryant. All Rights Reserved.\n\n";
 
 static const char *usage =
 " Usage:     AUDIO-STRETCH [-options] infile.wav outfile.wav\n\n"
@@ -66,7 +66,7 @@ typedef struct {
 #define WAVE_FORMAT_PCM         0x1
 #define WAVE_FORMAT_EXTENSIBLE  0xfffe
 
-static int write_pcm_wav_header (FILE *outfile, size_t num_samples, int num_channels, int bytes_per_sample, int sample_rate);
+static int write_pcm_wav_header (FILE *outfile, uint32_t num_samples, int num_channels, int bytes_per_sample, uint32_t sample_rate);
 
 #define BUFFER_SAMPLES 1024
 
@@ -76,7 +76,7 @@ int main (argc, argv) int argc; char **argv;
 {
     int asked_help = 0, overwrite = 0, scale_rate = 0, force_fast = 0, force_normal = 0, cycle_ratio = 0;
     int upper_frequency = 333, lower_frequency = 55, min_period, max_period;
-    int samples_to_process, insamples = 0, outsamples = 0;
+    uint32_t samples_to_process, insamples = 0, outsamples = 0;
     char *infilename = NULL, *outfilename = NULL;
     RiffChunkHeader riff_chunk_header;
     WaveHeader WaveHeader = { 0 };
@@ -251,7 +251,7 @@ int main (argc, argv) int argc; char **argv;
 
             if (format == WAVE_FORMAT_PCM) {
                 if (WaveHeader.SampleRate < 8000 || WaveHeader.SampleRate > 48000) {
-                    fprintf (stderr, "\"%s\" sample rate is %d, must be 8000 to 48000!\n", infilename, WaveHeader.SampleRate);
+                    fprintf (stderr, "\"%s\" sample rate is %lu, must be 8000 to 48000!\n", infilename, (unsigned long) WaveHeader.SampleRate);
                     return 1;
                 }
             }
@@ -289,7 +289,7 @@ int main (argc, argv) int argc; char **argv;
             break;
         }
         else {          // just ignore unknown chunks
-            int bytes_to_eat = (chunk_header.ckSize + 1) & ~1L;
+            uint32_t bytes_to_eat = (chunk_header.ckSize + 1) & ~1L;
             char dummy;
 
             while (bytes_to_eat--)
@@ -334,11 +334,17 @@ int main (argc, argv) int argc; char **argv;
         return 1;
     }
 
-    int scaled_rate = scale_rate ? (int)(WaveHeader.SampleRate * ratio + 0.5) : WaveHeader.SampleRate;
+    uint32_t scaled_rate = scale_rate ? (uint32_t)(WaveHeader.SampleRate * ratio + 0.5) : WaveHeader.SampleRate;
     write_pcm_wav_header (outfile, 0, WaveHeader.NumChannels, 2, scaled_rate);
 
-    short *inbuffer = malloc (BUFFER_SAMPLES * WaveHeader.BlockAlign);
-    short *outbuffer = malloc ((BUFFER_SAMPLES * 2 + max_period * 4) * WaveHeader.BlockAlign);
+    int16_t *inbuffer = malloc (BUFFER_SAMPLES * WaveHeader.BlockAlign);
+    int16_t *outbuffer = malloc ((BUFFER_SAMPLES * 2 + max_period * 4) * WaveHeader.BlockAlign);
+
+    if (!inbuffer || !outbuffer) {
+        fprintf (stderr, "can't allocate required memory!\n");
+        fclose (infile);
+        return 1;
+    }
 
     while (1) {
         int samples_read = fread (inbuffer, WaveHeader.BlockAlign,
@@ -376,22 +382,24 @@ int main (argc, argv) int argc; char **argv;
     fclose (outfile);
 
     if (insamples && verbose_mode) {
-        fprintf (stderr, "done, %d samples --> %d samples (ratio = %.3f)\n", insamples, outsamples, (float) outsamples / insamples);
+        fprintf (stderr, "done, %lu samples --> %lu samples (ratio = %.3f)\n",
+            (unsigned long) insamples, (unsigned long) outsamples, (float) outsamples / insamples);
         if (scale_rate)
-            fprintf (stderr, "sample rate changed from %d Hz to %d Hz\n", WaveHeader.SampleRate, scaled_rate);
+            fprintf (stderr, "sample rate changed from %lu Hz to %lu Hz\n",
+                (unsigned long) WaveHeader.SampleRate, (unsigned long) scaled_rate);
     }
 
     return 0;
 }
 
-static int write_pcm_wav_header (FILE *outfile, size_t num_samples, int num_channels, int bytes_per_sample, int sample_rate)
+static int write_pcm_wav_header (FILE *outfile, uint32_t num_samples, int num_channels, int bytes_per_sample, uint32_t sample_rate)
 {
     RiffChunkHeader riffhdr;
     ChunkHeader datahdr, fmthdr;
     WaveHeader wavhdr;
 
     int wavhdrsize = 16;
-    size_t total_data_bytes = num_samples * bytes_per_sample * num_channels;
+    uint32_t total_data_bytes = num_samples * bytes_per_sample * num_channels;
 
     memset (&wavhdr, 0, sizeof (wavhdr));
 

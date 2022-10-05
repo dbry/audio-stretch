@@ -19,11 +19,13 @@
 // and should contain approximately similar content.
 // For independent channels, prefer using multiple StretchHandle-instances.
 // see https://github.com/dbry/audio-stretch/issues/6
-// Multiple instances, of course, wil consume more CPU load.
+// Multiple instances, of course, will consume more CPU load.
 // In addition, different output amounts need to be handled.
 
 #ifndef STRETCH_H
 #define STRETCH_H
+
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -32,8 +34,8 @@ extern "C" {
 typedef void *StretchHandle;
 
 StretchHandle stretch_init (int shortest_period, int longest_period, int num_chans, int fast_mode);
-int stretch_samples (StretchHandle handle, const short *samples, int num_samples, short *output, float ratio);
-int stretch_flush (StretchHandle handle, short *output);
+int stretch_samples (StretchHandle handle, const int16_t *samples, int num_samples, int16_t *output, float ratio);
+int stretch_flush (StretchHandle handle, int16_t *output);
 void stretch_reset (StretchHandle handle);
 void stretch_deinit (StretchHandle handle);
 
