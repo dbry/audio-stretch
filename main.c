@@ -121,8 +121,8 @@ int main (argc, argv) int argc; char **argv;
                     case 'R': case 'r':
                         ratio = strtod (++*argv, argv);
 
-                        if (ratio < 0.5 || ratio > 2.0) {
-                            fprintf (stderr, "\nratio must be from 0.5 to 2.0!\n");
+                        if (ratio < 0.25 || ratio > 4.0) {
+                            fprintf (stderr, "\nratio must be from 0.25 to 4.0!\n");
                             return -1;
                         }
 
@@ -308,11 +308,17 @@ int main (argc, argv) int argc; char **argv;
 
     min_period = WaveHeader.SampleRate / upper_frequency;
     max_period = WaveHeader.SampleRate / lower_frequency;
-    int fast_mode = (force_fast || WaveHeader.SampleRate >= 32000) && !force_normal;
+    int flags = 0;
+
+    if (ratio < 0.5 || ratio > 2.0)
+        flags |= STRETCH_DUAL_FLAG;
+
+    if ((force_fast || WaveHeader.SampleRate >= 32000) && !force_normal)
+        flags |= STRETCH_FAST_FLAG;
 
     if (verbose_mode)
         fprintf (stderr, "initializing stretch library with period range = %d to %d, %d channels, %s\n",
-            min_period, max_period, WaveHeader.NumChannels, fast_mode ? "fast mode" : "normal mode");
+            min_period, max_period, WaveHeader.NumChannels, (flags & STRETCH_FAST_FLAG) ? "fast mode" : "normal mode");
 
     if (!quiet_mode && ratio == 1.0 && !cycle_ratio)
         fprintf (stderr, "warning: a ratio of 1.0 will do nothing but copy the WAV file!\n");
@@ -320,7 +326,7 @@ int main (argc, argv) int argc; char **argv;
     if (!quiet_mode && ratio != 1.0 && cycle_ratio && !scale_rate)
         fprintf (stderr, "warning: specifying ratio with cycling doesn't do anything (unless scaling rate)\n");
 
-    stretcher = stretch_init (min_period, max_period, WaveHeader.NumChannels, fast_mode);
+    stretcher = stretch_init (min_period, max_period, WaveHeader.NumChannels, flags);
 
     if (!stretcher) {
         fprintf (stderr, "can't initialize stretcher\n");
@@ -338,7 +344,7 @@ int main (argc, argv) int argc; char **argv;
     write_pcm_wav_header (outfile, 0, WaveHeader.NumChannels, 2, scaled_rate);
 
     int16_t *inbuffer = malloc (BUFFER_SAMPLES * WaveHeader.BlockAlign);
-    int16_t *outbuffer = malloc ((BUFFER_SAMPLES * 2 + max_period * 4) * WaveHeader.BlockAlign);
+    int16_t *outbuffer = malloc ((BUFFER_SAMPLES * 4 + max_period * 8) * WaveHeader.BlockAlign);
 
     if (!inbuffer || !outbuffer) {
         fprintf (stderr, "can't allocate required memory!\n");

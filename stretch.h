@@ -27,13 +27,16 @@
 
 #include <stdint.h>
 
+#define STRETCH_FAST_FLAG    0x1
+#define STRETCH_DUAL_FLAG    0x2
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 typedef void *StretchHandle;
 
-StretchHandle stretch_init (int shortest_period, int longest_period, int num_chans, int fast_mode);
+StretchHandle stretch_init (int shortest_period, int longest_period, int num_chans, int flags);
 int stretch_samples (StretchHandle handle, const int16_t *samples, int num_samples, int16_t *output, float ratio);
 int stretch_flush (StretchHandle handle, int16_t *output);
 void stretch_reset (StretchHandle handle);
