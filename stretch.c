@@ -49,6 +49,9 @@ struct stretch_cnxt {
     int16_t *inbuff, *calcbuff;
     float outsamples_error;
     uint32_t *results;
+
+    struct stretch_cnxt *next;
+    int16_t *intermediate;
 };
 
 static void merge_blocks (int16_t *output, int16_t *input1, int16_t *input2, int samples);
@@ -63,11 +66,11 @@ static int find_period (struct stretch_cnxt *cnxt, int16_t *samples);
  * worst-case performance will suffer if too short a period is selected.
  */
 
-StretchHandle stretch_init (int shortest_period, int longest_period, int num_channels, int fast_mode)
+StretchHandle stretch_init (int shortest_period, int longest_period, int num_channels, int flags)
 {
     struct stretch_cnxt *cnxt;
 
-    if (fast_mode) {
+    if (flags & STRETCH_FAST_FLAG) {
         longest_period = (longest_period + 1) & ~1;
         shortest_period &= ~1;
     }
@@ -83,22 +86,27 @@ StretchHandle stretch_init (int shortest_period, int longest_period, int num_cha
         cnxt->inbuff_samples = longest_period * num_channels * 6;
         cnxt->inbuff = calloc (cnxt->inbuff_samples, sizeof (*cnxt->inbuff));
 
-        if (num_channels == 2 || fast_mode)
+        if (num_channels == 2 || (flags & STRETCH_FAST_FLAG))
             cnxt->calcbuff = calloc (longest_period * num_channels, sizeof (*cnxt->calcbuff));
 
-        if (fast_mode)
+        if ((flags & STRETCH_FAST_FLAG))
             cnxt->results = calloc (longest_period, sizeof (*cnxt->results));
     }
 
-    if (!cnxt || !cnxt->inbuff || (num_channels == 2 && fast_mode && !cnxt->calcbuff) || (fast_mode && !cnxt->results)) {
+    if (!cnxt || !cnxt->inbuff || (num_channels == 2 && (flags & STRETCH_FAST_FLAG) && !cnxt->calcbuff) || ((flags & STRETCH_FAST_FLAG) && !cnxt->results)) {
         fprintf (stderr, "stretch_init(): out of memory!\n");
         return NULL;
     }
 
     cnxt->head = cnxt->tail = cnxt->longest = longest_period * num_channels;
+    cnxt->fast_mode = (flags & STRETCH_FAST_FLAG) ? 1 : 0;
     cnxt->shortest = shortest_period * num_channels;
     cnxt->num_chans = num_channels;
-    cnxt->fast_mode = fast_mode;
+
+    if (flags & STRETCH_DUAL_FLAG) {
+        cnxt->next = stretch_init (shortest_period, longest_period, num_channels, flags & ~STRETCH_DUAL_FLAG);
+        cnxt->intermediate = calloc (longest_period * num_channels * 4, sizeof (*cnxt->intermediate));
+    }
 
     return (StretchHandle) cnxt;
 }
@@ -110,8 +118,11 @@ StretchHandle stretch_init (int shortest_period, int longest_period, int num_cha
 
 void stretch_reset (StretchHandle handle)
 {
-  struct stretch_cnxt *cnxt = (struct stretch_cnxt *) handle;
-  cnxt->head = cnxt->tail = cnxt->longest;
+    struct stretch_cnxt *cnxt = (struct stretch_cnxt *) handle;
+    cnxt->head = cnxt->tail = cnxt->longest;
+
+    if (cnxt->next)
+        cnxt->next->head = cnxt->next->tail = cnxt->next->longest;
 }
 
 
@@ -127,7 +138,13 @@ void stretch_reset (StretchHandle handle)
 int stretch_samples (StretchHandle handle, const int16_t *samples, int num_samples, int16_t *output, float ratio)
 {
     struct stretch_cnxt *cnxt = (struct stretch_cnxt *) handle;
-    int out_samples = 0;
+    int out_samples = 0, next_samples = 0;
+    int16_t *outbuf = output;
+
+    if (cnxt->next) {
+        outbuf = cnxt->intermediate;
+        ratio = sqrt (ratio);
+    }
 
     num_samples *= cnxt->num_chans;
 
@@ -177,29 +194,29 @@ int stretch_samples (StretchHandle handle, const int16_t *samples, int num_sampl
                 process_ratio = ceil (ratio * 2.0) / 2.0;
 
             if (process_ratio == 0.5) {
-                merge_blocks (output + out_samples, cnxt->inbuff + cnxt->tail,
+                merge_blocks (outbuf + out_samples, cnxt->inbuff + cnxt->tail,
                     cnxt->inbuff + cnxt->tail + period, period);
                 cnxt->outsamples_error += period - (period * 2.0 * ratio);
                 out_samples += period;
                 cnxt->tail += period * 2;
             }
             else if (process_ratio == 1.0) {
-                memcpy (output + out_samples, cnxt->inbuff + cnxt->tail, period * 2 * sizeof (cnxt->inbuff [0]));
+                memcpy (outbuf + out_samples, cnxt->inbuff + cnxt->tail, period * 2 * sizeof (cnxt->inbuff [0]));
                 cnxt->outsamples_error += (period * 2.0) - (period * 2.0 * ratio);
                 out_samples += period * 2;
                 cnxt->tail += period * 2;
             }
             else if (process_ratio == 1.5) {
-                memcpy (output + out_samples, cnxt->inbuff + cnxt->tail, period * sizeof (cnxt->inbuff [0]));
-                merge_blocks (output + out_samples + period, cnxt->inbuff + cnxt->tail + period,
+                memcpy (outbuf + out_samples, cnxt->inbuff + cnxt->tail, period * sizeof (cnxt->inbuff [0]));
+                merge_blocks (outbuf + out_samples + period, cnxt->inbuff + cnxt->tail + period,
                     cnxt->inbuff + cnxt->tail, period);
-                memcpy (output + out_samples + period * 2, cnxt->inbuff + cnxt->tail + period, period * sizeof (cnxt->inbuff [0]));
+                memcpy (outbuf + out_samples + period * 2, cnxt->inbuff + cnxt->tail + period, period * sizeof (cnxt->inbuff [0]));
                 cnxt->outsamples_error += (period * 3.0) - (period * 2.0 * ratio);
                 out_samples += period * 3;
                 cnxt->tail += period * 2;
             }
             else if (process_ratio == 2.0) {
-                merge_blocks (output + out_samples, cnxt->inbuff + cnxt->tail,
+                merge_blocks (outbuf + out_samples, cnxt->inbuff + cnxt->tail,
                     cnxt->inbuff + cnxt->tail - period, period * 2);
 
                 cnxt->outsamples_error += (period * 2.0) - (period * ratio);
@@ -207,7 +224,7 @@ int stretch_samples (StretchHandle handle, const int16_t *samples, int num_sampl
                 cnxt->tail += period;
 
                 if (cnxt->fast_mode) {
-                    merge_blocks (output + out_samples, cnxt->inbuff + cnxt->tail,
+                    merge_blocks (outbuf + out_samples, cnxt->inbuff + cnxt->tail,
                         cnxt->inbuff + cnxt->tail - period, period * 2);
 
                     cnxt->outsamples_error += (period * 2.0) - (period * ratio);
@@ -217,6 +234,11 @@ int stretch_samples (StretchHandle handle, const int16_t *samples, int num_sampl
             }
             else
                 fprintf (stderr, "stretch_samples: fatal programming error: process_ratio == %g\n", process_ratio);
+
+            if (cnxt->next) {
+                next_samples += stretch_samples (cnxt->next, outbuf, out_samples / cnxt->num_chans, output + next_samples * cnxt->num_chans, ratio);
+                out_samples = 0;
+            }
         }
 
         /* if we're almost done with buffer, copy the rest back to beginning */
@@ -233,7 +255,7 @@ int stretch_samples (StretchHandle handle, const int16_t *samples, int num_sampl
 
     } while (num_samples);
 
-    return out_samples / cnxt->num_chans;
+    return cnxt->next ? next_samples : out_samples / cnxt->num_chans;
 }  
 
 /* flush any leftover samples out at normal speed */
@@ -258,6 +280,10 @@ void stretch_deinit (StretchHandle handle)
     free (cnxt->calcbuff);
     free (cnxt->results);
     free (cnxt->inbuff);
+
+    if (cnxt->next)
+        stretch_deinit (cnxt->next);
+
     free (cnxt);
 }
 
