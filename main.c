@@ -15,6 +15,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
+#include <assert.h>
 
 #include "stretch.h"
 
@@ -344,7 +345,8 @@ int main (argc, argv) int argc; char **argv;
     write_pcm_wav_header (outfile, 0, WaveHeader.NumChannels, 2, scaled_rate);
 
     int16_t *inbuffer = malloc (BUFFER_SAMPLES * WaveHeader.BlockAlign);
-    int16_t *outbuffer = malloc ( stretch_output_capacity (stretcher, BUFFER_SAMPLES) * WaveHeader.BlockAlign);
+    int out_capacity = stretch_output_capacity (stretcher, BUFFER_SAMPLES);
+    int16_t *outbuffer = malloc ( out_capacity * WaveHeader.BlockAlign);
 
     if (!inbuffer || !outbuffer) {
         fprintf (stderr, "can't allocate required memory!\n");
@@ -367,6 +369,7 @@ int main (argc, argv) int argc; char **argv;
             samples_generated = stretch_samples (stretcher, inbuffer, samples_read, outbuffer, ratio);
         else
             samples_generated = stretch_flush (stretcher, outbuffer);
+        assert( samples_generated <= out_capacity );
 
         if (samples_generated) {
             fwrite (outbuffer, WaveHeader.BlockAlign, samples_generated, outfile);
