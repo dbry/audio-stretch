@@ -344,7 +344,7 @@ int main (argc, argv) int argc; char **argv;
     write_pcm_wav_header (outfile, 0, WaveHeader.NumChannels, 2, scaled_rate);
 
     int16_t *inbuffer = malloc (BUFFER_SAMPLES * WaveHeader.BlockAlign);
-    int16_t *outbuffer = malloc ((BUFFER_SAMPLES * 4 + max_period * 8) * WaveHeader.BlockAlign);
+    int16_t *outbuffer = malloc ( stretch_output_capacity (stretcher, BUFFER_SAMPLES) * WaveHeader.BlockAlign);
 
     if (!inbuffer || !outbuffer) {
         fprintf (stderr, "can't allocate required memory!\n");

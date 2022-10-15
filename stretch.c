@@ -125,6 +125,18 @@ void stretch_reset (StretchHandle handle)
         cnxt->next->head = cnxt->next->tail = cnxt->next->longest;
 }
 
+/*
+ * determine, how many samples (per channel) should be reserved in 'output'-array
+ * for stretch_samples(). max_num_samples is the maximum for 'num_samples' when
+ * calling stretch_samples().
+ */
+
+int stretch_output_capacity (StretchHandle handle, int max_num_samples )
+{
+    struct stretch_cnxt *cnxt = (struct stretch_cnxt *) handle;
+    int max_out = 4 * max_num_samples + 8 * cnxt->longest / cnxt->num_chans;
+    return max_out;
+}
 
 /*
  * Process the specified samples with the given ratio (which is clipped to the
