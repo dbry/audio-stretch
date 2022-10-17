@@ -69,10 +69,12 @@ static int find_period (struct stretch_cnxt *cnxt, int16_t *samples);
 StretchHandle stretch_init (int shortest_period, int longest_period, int num_channels, int flags)
 {
     struct stretch_cnxt *cnxt;
+    int max_periods = 3;
 
     if (flags & STRETCH_FAST_FLAG) {
         longest_period = (longest_period + 1) & ~1;
         shortest_period &= ~1;
+        max_periods = 4;
     }
 
     if (longest_period <= shortest_period || shortest_period < MIN_PERIOD || longest_period > MAX_PERIOD) {
@@ -83,7 +85,7 @@ StretchHandle stretch_init (int shortest_period, int longest_period, int num_cha
     cnxt = (struct stretch_cnxt *) calloc (1, sizeof (struct stretch_cnxt));
 
     if (cnxt) {
-        cnxt->inbuff_samples = longest_period * num_channels * 6;
+        cnxt->inbuff_samples = longest_period * num_channels * max_periods;
         cnxt->inbuff = calloc (cnxt->inbuff_samples, sizeof (*cnxt->inbuff));
 
         if (num_channels == 2 || (flags & STRETCH_FAST_FLAG))
@@ -105,7 +107,7 @@ StretchHandle stretch_init (int shortest_period, int longest_period, int num_cha
 
     if (flags & STRETCH_DUAL_FLAG) {
         cnxt->next = stretch_init (shortest_period, longest_period, num_channels, flags & ~STRETCH_DUAL_FLAG);
-        cnxt->intermediate = calloc (longest_period * num_channels * 4, sizeof (*cnxt->intermediate));
+        cnxt->intermediate = calloc (longest_period * num_channels * max_periods, sizeof (*cnxt->intermediate));
     }
 
     return (StretchHandle) cnxt;
@@ -119,12 +121,48 @@ StretchHandle stretch_init (int shortest_period, int longest_period, int num_cha
 void stretch_reset (StretchHandle handle)
 {
     struct stretch_cnxt *cnxt = (struct stretch_cnxt *) handle;
+
     cnxt->head = cnxt->tail = cnxt->longest;
+    memset (cnxt->inbuff, 0, cnxt->tail * sizeof (*cnxt->inbuff));
 
     if (cnxt->next)
-        cnxt->next->head = cnxt->next->tail = cnxt->next->longest;
+        stretch_reset (cnxt->next);
 }
 
+/*
+ * Determine how many samples (per channel) should be reserved in 'output'-array
+ * for stretch_samples() and stretch_flush(). max_num_samples is the maximum for
+ * 'num_samples' when calling stretch_samples().
+ */
+
+int stretch_output_capacity (StretchHandle handle, int max_num_samples, float max_ratio)
+{
+    struct stretch_cnxt *cnxt = (struct stretch_cnxt *) handle;
+    int max_period = cnxt->longest / cnxt->num_chans;
+    int max_expected_samples;
+    float next_ratio;
+
+    if (cnxt->next) {
+        if (max_ratio < 0.5) {
+            next_ratio = max_ratio / 0.5;
+            max_ratio = 0.5;
+        }
+        else if (max_ratio > 2.0) {
+            next_ratio = max_ratio / 2.0;
+            max_ratio = 2.0;
+        }
+        else
+            next_ratio = 1.0;
+    }
+
+    max_expected_samples = (int) ceil (max_num_samples * ceil (max_ratio * 2.0) / 2.0) +
+        max_period * (cnxt->fast_mode ? 4 : 3);
+
+    if (cnxt->next)
+        max_expected_samples = stretch_output_capacity (cnxt->next, max_expected_samples, next_ratio);
+
+    return max_expected_samples;
+}
 
 /*
  * Process the specified samples with the given ratio (which is clipped to the
@@ -140,10 +178,21 @@ int stretch_samples (StretchHandle handle, const int16_t *samples, int num_sampl
     struct stretch_cnxt *cnxt = (struct stretch_cnxt *) handle;
     int out_samples = 0, next_samples = 0;
     int16_t *outbuf = output;
+    float next_ratio;
 
     if (cnxt->next) {
         outbuf = cnxt->intermediate;
-        ratio = sqrt (ratio);
+
+        if (ratio < 0.5) {
+            next_ratio = ratio / 0.5;
+            ratio = 0.5;
+        }
+        else if (ratio > 2.0) {
+            next_ratio = ratio / 2.0;
+            ratio = 2.0;
+        }
+        else
+            next_ratio = 1.0;
     }
 
     num_samples *= cnxt->num_chans;
@@ -173,9 +222,16 @@ int stretch_samples (StretchHandle handle, const int16_t *samples, int num_sampl
         /* while there are enough samples to process, do so */
 
         while (cnxt->tail >= cnxt->longest && cnxt->head - cnxt->tail >= cnxt->longest * (cnxt->fast_mode ? 3 : 2)) {
-            int period = cnxt->fast_mode ? find_period_fast (cnxt, cnxt->inbuff + cnxt->tail) :
-                find_period (cnxt, cnxt->inbuff + cnxt->tail);
             float process_ratio;
+            int period;
+
+            if (ratio != 1.0 || cnxt->outsamples_error)
+                period = cnxt->fast_mode ? find_period_fast (cnxt, cnxt->inbuff + cnxt->tail) :
+                    find_period (cnxt, cnxt->inbuff + cnxt->tail);
+            else
+                period = cnxt->longest;
+
+            // printf ("%d\n", period / cnxt->num_chans);
 
             /*
              * Once we have calculated the best-match period, there are 4 possible transformations
@@ -202,7 +258,12 @@ int stretch_samples (StretchHandle handle, const int16_t *samples, int num_sampl
             }
             else if (process_ratio == 1.0) {
                 memcpy (outbuf + out_samples, cnxt->inbuff + cnxt->tail, period * 2 * sizeof (cnxt->inbuff [0]));
-                cnxt->outsamples_error += (period * 2.0) - (period * 2.0 * ratio);
+
+                if (ratio != 1.0)
+                    cnxt->outsamples_error += (period * 2.0) - (period * 2.0 * ratio);
+                else
+                    cnxt->outsamples_error = 0;
+
                 out_samples += period * 2;
                 cnxt->tail += period * 2;
             }
@@ -236,7 +297,7 @@ int stretch_samples (StretchHandle handle, const int16_t *samples, int num_sampl
                 fprintf (stderr, "stretch_samples: fatal programming error: process_ratio == %g\n", process_ratio);
 
             if (cnxt->next) {
-                next_samples += stretch_samples (cnxt->next, outbuf, out_samples / cnxt->num_chans, output + next_samples * cnxt->num_chans, ratio);
+                next_samples += stretch_samples (cnxt->next, outbuf, out_samples / cnxt->num_chans, output + next_samples * cnxt->num_chans, next_ratio);
                 out_samples = 0;
             }
         }
@@ -258,17 +319,28 @@ int stretch_samples (StretchHandle handle, const int16_t *samples, int num_sampl
     return cnxt->next ? next_samples : out_samples / cnxt->num_chans;
 }  
 
-/* flush any leftover samples out at normal speed */
+/*
+ * Flush any leftover samples out at normal speed. For cascaded dual instances this must be called
+ * twice to completely flush, or simply call it until it returns zero samples
+ */
 
 int stretch_flush (StretchHandle handle, int16_t *output)
 {
     struct stretch_cnxt *cnxt = (struct stretch_cnxt *) handle;
-    int samples_to_copy = (cnxt->head - cnxt->tail) / cnxt->num_chans;
+    int samples_leftover = (cnxt->head - cnxt->tail) / cnxt->num_chans;
+    int samples_flushed;
 
-    memcpy (output, cnxt->inbuff + cnxt->tail, samples_to_copy * cnxt->num_chans * sizeof (*output));
+    if (cnxt->next && samples_leftover)
+        samples_flushed = stretch_samples (cnxt->next, cnxt->inbuff + cnxt->tail, samples_leftover, output, 1.0);
+    else if (cnxt->next)
+        samples_flushed = stretch_flush (cnxt->next, output);
+    else {
+        memcpy (output, cnxt->inbuff + cnxt->tail, samples_leftover * cnxt->num_chans * sizeof (*output));
+        samples_flushed = samples_leftover;
+    }
+
     cnxt->tail = cnxt->head;
-
-    return samples_to_copy;
+    return samples_flushed;
 }
 
 /* free handle */
@@ -281,8 +353,10 @@ void stretch_deinit (StretchHandle handle)
     free (cnxt->results);
     free (cnxt->inbuff);
 
-    if (cnxt->next)
+    if (cnxt->next) {
         stretch_deinit (cnxt->next);
+        free (cnxt->intermediate);
+    }
 
     free (cnxt);
 }

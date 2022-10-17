@@ -24,11 +24,12 @@ static const char *sign_on = "\n"
 
 static const char *usage =
 " Usage:     AUDIO-STRETCH [-options] infile.wav outfile.wav\n\n"
-" Options:  -r<n.n> = stretch ratio (0.5 to 2.0, default = 1.0)\n"
+" Options:  -r<n.n> = stretch ratio (0.25 to 4.0, default = 1.0)\n"
 "           -u<n>   = upper freq period limit (default = 333 Hz)\n"
 "           -l<n>   = lower freq period limit (default = 55 Hz)\n"
 "           -c      = cycle through all ratios, starting higher\n"
 "           -cc     = cycle through all ratios, starting lower\n"
+"           -d      = force dual instance even for shallow ratios\n"
 "           -s      = scale rate to preserve duration (not pitch)\n"
 "           -f      = fast pitch detection (default >= 32 kHz)\n"
 "           -n      = normal pitch detection (default < 32 kHz)\n"
@@ -74,8 +75,8 @@ static int verbose_mode, quiet_mode;
 
 int main (argc, argv) int argc; char **argv;
 {
-    int asked_help = 0, overwrite = 0, scale_rate = 0, force_fast = 0, force_normal = 0, cycle_ratio = 0;
-    int upper_frequency = 333, lower_frequency = 55, min_period, max_period;
+    int asked_help = 0, overwrite = 0, scale_rate = 0, force_fast = 0, force_normal = 0, force_dual = 0, cycle_ratio = 0;
+    int buffer_samples = BUFFER_SAMPLES, upper_frequency = 333, lower_frequency = 55, min_period, max_period;
     uint32_t samples_to_process, insamples = 0, outsamples = 0;
     char *infilename = NULL, *outfilename = NULL;
     RiffChunkHeader riff_chunk_header;
@@ -135,6 +136,10 @@ int main (argc, argv) int argc; char **argv;
 
                     case 'C': case 'c':
                         cycle_ratio++;
+                        break;
+
+                    case 'D': case 'd':
+                        force_dual = 1;
                         break;
 
                     case 'F': case 'f':
@@ -310,15 +315,16 @@ int main (argc, argv) int argc; char **argv;
     max_period = WaveHeader.SampleRate / lower_frequency;
     int flags = 0;
 
-    if (ratio < 0.5 || ratio > 2.0)
+    if (force_dual || ratio < 0.5 || ratio > 2.0)
         flags |= STRETCH_DUAL_FLAG;
 
     if ((force_fast || WaveHeader.SampleRate >= 32000) && !force_normal)
         flags |= STRETCH_FAST_FLAG;
 
     if (verbose_mode)
-        fprintf (stderr, "initializing stretch library with period range = %d to %d, %d channels, %s\n",
-            min_period, max_period, WaveHeader.NumChannels, (flags & STRETCH_FAST_FLAG) ? "fast mode" : "normal mode");
+        fprintf (stderr, "initializing stretch library with period range = %d to %d, %d channels, %s, %s\n",
+            min_period, max_period, WaveHeader.NumChannels, (flags & STRETCH_FAST_FLAG) ? "fast mode" : "normal mode",
+            (flags & STRETCH_DUAL_FLAG) ? "dual instance" : "single instance");
 
     if (!quiet_mode && ratio == 1.0 && !cycle_ratio)
         fprintf (stderr, "warning: a ratio of 1.0 will do nothing but copy the WAV file!\n");
@@ -343,8 +349,13 @@ int main (argc, argv) int argc; char **argv;
     uint32_t scaled_rate = scale_rate ? (uint32_t)(WaveHeader.SampleRate * ratio + 0.5) : WaveHeader.SampleRate;
     write_pcm_wav_header (outfile, 0, WaveHeader.NumChannels, 2, scaled_rate);
 
-    int16_t *inbuffer = malloc (BUFFER_SAMPLES * WaveHeader.BlockAlign);
-    int16_t *outbuffer = malloc ((BUFFER_SAMPLES * 4 + max_period * 8) * WaveHeader.BlockAlign);
+    if (cycle_ratio)
+        ratio = (flags & STRETCH_DUAL_FLAG) ? 4.0 : 2.0;
+
+    int max_expected_samples = stretch_output_capacity (stretcher, buffer_samples, ratio);
+    int16_t *outbuffer = malloc (max_expected_samples * WaveHeader.BlockAlign);
+    int16_t *inbuffer = malloc (buffer_samples * WaveHeader.BlockAlign);
+    int max_generated_stretch = 0, max_generated_flush = 0;
 
     if (!inbuffer || !outbuffer) {
         fprintf (stderr, "can't allocate required memory!\n");
@@ -354,23 +365,42 @@ int main (argc, argv) int argc; char **argv;
 
     while (1) {
         int samples_read = fread (inbuffer, WaveHeader.BlockAlign,
-            samples_to_process >= BUFFER_SAMPLES ? BUFFER_SAMPLES : samples_to_process, infile);
+            samples_to_process >= buffer_samples ? buffer_samples : samples_to_process, infile);
         int samples_generated;
 
         insamples += samples_read;
         samples_to_process -= samples_read;
 
-        if (cycle_ratio)
-            ratio = (sin ((double) outsamples / WaveHeader.SampleRate) * (cycle_ratio & 1 ? 0.75 : -0.75)) + 1.25;
+        if (cycle_ratio) {
+            if (flags & STRETCH_DUAL_FLAG)
+                ratio = (sin ((double) outsamples / WaveHeader.SampleRate) * (cycle_ratio & 1 ? 1.875 : -1.875)) + 2.125;
+            else
+                ratio = (sin ((double) outsamples / WaveHeader.SampleRate) * (cycle_ratio & 1 ? 0.75 : -0.75)) + 1.25;
+        }
 
-        if (samples_read)
+        if (samples_read) {
             samples_generated = stretch_samples (stretcher, inbuffer, samples_read, outbuffer, ratio);
-        else
+
+            if (samples_generated > max_generated_stretch)
+                max_generated_stretch = samples_generated;
+        }
+        else {
             samples_generated = stretch_flush (stretcher, outbuffer);
+
+            if (samples_generated > max_generated_flush)
+                max_generated_flush = samples_generated;
+        }
 
         if (samples_generated) {
             fwrite (outbuffer, WaveHeader.BlockAlign, samples_generated, outfile);
             outsamples += samples_generated;
+
+            if (samples_generated > max_expected_samples) {
+                fprintf (stderr, "%s: generated samples (%d) exceeded expected (%d)!\n", samples_read ? "stretch" : "flush",
+                    samples_generated, max_expected_samples);
+                fclose (infile);
+                return 1;
+            }
         }
 
         if (!samples_read && !samples_generated)
@@ -393,6 +423,8 @@ int main (argc, argv) int argc; char **argv;
         if (scale_rate)
             fprintf (stderr, "sample rate changed from %lu Hz to %lu Hz\n",
                 (unsigned long) WaveHeader.SampleRate, (unsigned long) scaled_rate);
+        fprintf (stderr, "max expected samples = %d, actually seen = %d stretch, %d flush\n",
+            max_expected_samples, max_generated_stretch, max_generated_flush);
     }
 
     return 0;

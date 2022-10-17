@@ -37,6 +37,7 @@ extern "C" {
 typedef void *StretchHandle;
 
 StretchHandle stretch_init (int shortest_period, int longest_period, int num_chans, int flags);
+int stretch_output_capacity (StretchHandle handle, int max_num_samples, float max_ratio);
 int stretch_samples (StretchHandle handle, const int16_t *samples, int num_samples, int16_t *output, float ratio);
 int stretch_flush (StretchHandle handle, int16_t *output);
 void stretch_reset (StretchHandle handle);
