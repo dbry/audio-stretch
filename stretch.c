@@ -180,6 +180,8 @@ int stretch_samples (StretchHandle handle, const int16_t *samples, int num_sampl
     int16_t *outbuf = output;
     float next_ratio;
 
+    /* if there's a cascaded instance after this one, try to do as much of the ratio here and the rest in "next" */
+
     if (cnxt->next) {
         outbuf = cnxt->intermediate;
 
@@ -197,29 +199,30 @@ int stretch_samples (StretchHandle handle, const int16_t *samples, int num_sampl
 
     num_samples *= cnxt->num_chans;
 
+    /* this really should not happen, but a good idea to clamp in case */
+
     if (ratio < 0.5)
         ratio = 0.5;
     else if (ratio > 2.0)
         ratio = 2.0;
 
-    /* while we have samples to do... */
+    /* while we have pending samples to read into our buffer */
 
-    do {
-        /* if there are more samples and room for them, copy in */
+    while (num_samples) {
 
-        if (num_samples && cnxt->head < cnxt->inbuff_samples) {
-            int samples_to_copy = num_samples;
+        /* copy in as many samples as we have room for */
 
-            if (samples_to_copy > cnxt->inbuff_samples - cnxt->head)
-                samples_to_copy = cnxt->inbuff_samples - cnxt->head; 
+        int samples_to_copy = num_samples;
 
-            memcpy (cnxt->inbuff + cnxt->head, samples, samples_to_copy * sizeof (cnxt->inbuff [0]));
-            num_samples -= samples_to_copy;
-            samples += samples_to_copy;
-            cnxt->head += samples_to_copy;
-        }
+        if (samples_to_copy > cnxt->inbuff_samples - cnxt->head)
+            samples_to_copy = cnxt->inbuff_samples - cnxt->head;
 
-        /* while there are enough samples to process, do so */
+        memcpy (cnxt->inbuff + cnxt->head, samples, samples_to_copy * sizeof (cnxt->inbuff [0]));
+        num_samples -= samples_to_copy;
+        samples += samples_to_copy;
+        cnxt->head += samples_to_copy;
+
+        /* while there are enough samples to process (3 or 4 times the longest period), do so */
 
         while (cnxt->tail >= cnxt->longest && cnxt->head - cnxt->tail >= cnxt->longest * (cnxt->fast_mode ? 3 : 2)) {
             float process_ratio;
@@ -296,15 +299,15 @@ int stretch_samples (StretchHandle handle, const int16_t *samples, int num_sampl
             else
                 fprintf (stderr, "stretch_samples: fatal programming error: process_ratio == %g\n", process_ratio);
 
+            /* if there's another cascaded instance after this, pass the just stretched samples into that */
+
             if (cnxt->next) {
                 next_samples += stretch_samples (cnxt->next, outbuf, out_samples / cnxt->num_chans, output + next_samples * cnxt->num_chans, next_ratio);
                 out_samples = 0;
             }
-        }
 
-        /* if we're almost done with buffer, copy the rest back to beginning */
+            /* finally, left-justify the samples in the buffer leaving one longest period of history */
 
-        if (cnxt->head == cnxt->inbuff_samples) {
             int samples_to_move = cnxt->inbuff_samples - cnxt->tail + cnxt->longest;
 
             memmove (cnxt->inbuff, cnxt->inbuff + cnxt->tail - cnxt->longest,
@@ -313,8 +316,29 @@ int stretch_samples (StretchHandle handle, const int16_t *samples, int num_sampl
             cnxt->head -= cnxt->tail - cnxt->longest;
             cnxt->tail = cnxt->longest;
         }
+    }
 
-    } while (num_samples);
+    /*
+     * This code is not strictly required, but will reduce latency, especially in the dual-instance case, by
+     * always flushing all pending samples if no actual stretching is desired (i.e., ratio is 1.0 and there's
+     * no error to compensate for). This case is more common now than previously because of the gap detection
+     * and cascaded instances.
+     */
+
+    if (ratio == 1.0 && !cnxt->outsamples_error && cnxt->head != cnxt->tail) {
+        int samples_leftover = cnxt->head - cnxt->tail;
+
+        if (cnxt->next)
+            next_samples += stretch_samples (cnxt->next, cnxt->inbuff + cnxt->tail, samples_leftover / cnxt->num_chans,
+                output + next_samples * cnxt->num_chans, next_ratio);
+        else {
+            memcpy (outbuf + out_samples, cnxt->inbuff + cnxt->tail, samples_leftover * sizeof (*output));
+            out_samples += samples_leftover;
+        }
+
+        memmove (cnxt->inbuff, cnxt->inbuff + cnxt->head - cnxt->longest, cnxt->longest * sizeof (cnxt->inbuff [0]));
+        cnxt->head = cnxt->tail = cnxt->longest;
+    }
 
     return cnxt->next ? next_samples : out_samples / cnxt->num_chans;
 }  
@@ -327,16 +351,19 @@ int stretch_samples (StretchHandle handle, const int16_t *samples, int num_sampl
 int stretch_flush (StretchHandle handle, int16_t *output)
 {
     struct stretch_cnxt *cnxt = (struct stretch_cnxt *) handle;
-    int samples_leftover = (cnxt->head - cnxt->tail) / cnxt->num_chans;
-    int samples_flushed;
+    int samples_leftover = cnxt->head - cnxt->tail;
+    int samples_flushed = 0;
 
-    if (cnxt->next && samples_leftover)
-        samples_flushed = stretch_samples (cnxt->next, cnxt->inbuff + cnxt->tail, samples_leftover, output, 1.0);
-    else if (cnxt->next)
-        samples_flushed = stretch_flush (cnxt->next, output);
+    if (cnxt->next) {
+        if (samples_leftover)
+            samples_flushed = stretch_samples (cnxt->next, cnxt->inbuff + cnxt->tail, samples_leftover / cnxt->num_chans, output, 1.0);
+
+        if (!samples_flushed)
+            samples_flushed = stretch_flush (cnxt->next, output);
+    }
     else {
-        memcpy (output, cnxt->inbuff + cnxt->tail, samples_leftover * cnxt->num_chans * sizeof (*output));
-        samples_flushed = samples_leftover;
+        memcpy (output, cnxt->inbuff + cnxt->tail, samples_leftover * sizeof (*output));
+        samples_flushed = samples_leftover / cnxt->num_chans;
     }
 
     cnxt->tail = cnxt->head;
