@@ -1,7 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////
 //                        **** AUDIO-STRETCH ****                         //
 //                      Time Domain Harmonic Scaler                       //
-//                    Copyright (c) 2019 David Bryant                     //
+//                    Copyright (c) 2022 David Bryant                     //
 //                          All Rights Reserved.                          //
 //      Distributed under the BSD Software License (see license.txt)      //
 ////////////////////////////////////////////////////////////////////////////
@@ -19,16 +19,14 @@
 // and should contain approximately similar content.
 // For independent channels, prefer using multiple StretchHandle-instances.
 // see https://github.com/dbry/audio-stretch/issues/6
-// Multiple instances, of course, will consume more CPU load.
-// In addition, different output amounts need to be handled.
 
 #ifndef STRETCH_H
 #define STRETCH_H
 
 #include <stdint.h>
 
-#define STRETCH_FAST_FLAG    0x1
-#define STRETCH_DUAL_FLAG    0x2
+#define STRETCH_FAST_FLAG    0x1    // use "fast" version of period determination code
+#define STRETCH_DUAL_FLAG    0x2    // cascade two instances (doubles usable ratio range)
 
 #ifdef __cplusplus
 extern "C" {

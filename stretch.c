@@ -19,8 +19,6 @@
 // and should contain approximately similar content.
 // For independent channels, prefer using multiple StretchHandle-instances.
 // see https://github.com/dbry/audio-stretch/issues/6
-// Multiple instances, of course, will consume more CPU load.
-// In addition, different output amounts need to be handled.
 
 
 #include <stdio.h>
@@ -63,7 +61,12 @@ static int find_period (struct stretch_cnxt *cnxt, int16_t *samples);
  * are specified here. The longest period determines the lowest fundamental frequency
  * that can be handled correctly. Note that higher frequencies can be handled than the
  * shortest period would suggest because multiple periods can be combined, and the
- * worst-case performance will suffer if too short a period is selected.
+ * worst-case performance will suffer if too short a period is selected. The flags are:
+ *
+ * STRETCH_FAST_FLAG    0x1     Use the "fast" version of the period calculation
+ *
+ * STRETCH_DUAL_FLAG    0x2     Cascade two instances of the stretcher to expand
+ *                              available ratios to 0.25X to 4.00X
  */
 
 StretchHandle stretch_init (int shortest_period, int longest_period, int num_channels, int flags)
@@ -131,8 +134,8 @@ void stretch_reset (StretchHandle handle)
 
 /*
  * Determine how many samples (per channel) should be reserved in 'output'-array
- * for stretch_samples() and stretch_flush(). max_num_samples is the maximum for
- * 'num_samples' when calling stretch_samples().
+ * for stretch_samples() and stretch_flush(). max_num_samples and max_ratio are the
+ * maximum values that will be passed to stretch_samples().
  */
 
 int stretch_output_capacity (StretchHandle handle, int max_num_samples, float max_ratio)
@@ -165,12 +168,19 @@ int stretch_output_capacity (StretchHandle handle, int max_num_samples, float ma
 }
 
 /*
- * Process the specified samples with the given ratio (which is clipped to the
- * range 0.5 to 2.0). Note that the number of samples refers to total samples for
- * both channels in stereo and can be as large as desired (samples are buffered
- * here). The exact number of samples output is not possible to determine in
- * advance, but the maximum will be the number of input samples times the ratio
- * plus 3X the longest period (or 4X the longest period in "fast" mode).
+ * Process the specified samples with the given ratio (which is normally clipped to
+ * the range 0.5 to 2.0, or 0.25 to 4.00 for the "dual" mode). Note that in stereo
+ * the number of samples refers to the samples for one channel (i.e., not the total
+ * number of values passed) and can be as large as desired (samples are buffered here).
+ * The ratio may change between calls, but there is some latency to consider because
+ * audio is buffered here and a new ratio may be applied to previously sent samples.
+ *
+ * The exact number of samples output is not easy to determine in advance, so a function
+ * is provided (stretch_output_capacity()) that calculates the maximum number of samples
+ * that can be generated from a single call to this function (or stretch_flush()) given
+ * a number of samples and maximum ratio. It is reccomended that that function be used
+ * after initialization to allocate in advance the buffer size required. Be sure to
+ * multiply the return value by the number channels!
  */
 
 int stretch_samples (StretchHandle handle, const int16_t *samples, int num_samples, int16_t *output, float ratio)
@@ -234,8 +244,6 @@ int stretch_samples (StretchHandle handle, const int16_t *samples, int num_sampl
             else
                 period = cnxt->longest;
 
-            // printf ("%d\n", period / cnxt->num_chans);
-
             /*
              * Once we have calculated the best-match period, there are 4 possible transformations
              * available to convert the input samples to output samples. Obviously we can simply
@@ -265,7 +273,7 @@ int stretch_samples (StretchHandle handle, const int16_t *samples, int num_sampl
                 if (ratio != 1.0)
                     cnxt->outsamples_error += (period * 2.0) - (period * 2.0 * ratio);
                 else
-                    cnxt->outsamples_error = 0;
+                    cnxt->outsamples_error = 0; /* if the ratio is 1.0, we can never cancel the error, so just do it now */
 
                 out_samples += period * 2;
                 cnxt->tail += period * 2;
@@ -345,7 +353,9 @@ int stretch_samples (StretchHandle handle, const int16_t *samples, int num_sampl
 
 /*
  * Flush any leftover samples out at normal speed. For cascaded dual instances this must be called
- * twice to completely flush, or simply call it until it returns zero samples
+ * twice to completely flush, or simply call it until it returns zero samples. The maximum number
+ * of samples that can be returned from each call of this function can be determined in advance with
+ * stretch_output_capacity().
  */
 
 int stretch_flush (StretchHandle handle, int16_t *output)
@@ -367,6 +377,8 @@ int stretch_flush (StretchHandle handle, int16_t *output)
     }
 
     cnxt->tail = cnxt->head;
+    memset (cnxt->inbuff, 0, cnxt->tail * sizeof (*cnxt->inbuff));
+
     return samples_flushed;
 }
 
