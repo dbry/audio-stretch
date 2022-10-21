@@ -17,7 +17,8 @@ From Wikipedia, the free encyclopedia:
     frequency domain).
 
 This project is an implementation of a TDHS library and a command-line demo
-program to utilize it with standard WAV files.
+program to utilize it with standard WAV files. The command-line program
+also incorporates silence detection so that can be handled differently.
 
 There are two effects possible with TDHS and the audio-stretch demo. The
 first is the more obvious mentioned above of changing the duration (or
@@ -38,8 +39,10 @@ Note that unless ratios of exactly 0.5 or 2.0 are used with the -s option,
 non-standard sampling rates will probably result. Many programs will still
 properly play these files, and audio editing programs will likely import
 them correctly (by resampling), but it is possible that some applications
-will barf on them. They could also be resampled using an audio resampling
-tool also available here: https://github.com/dbry/audio-resampler
+will barf on them. They can also be resampled to a standard rate using
+an audio resampling tool I wrote that's also available here on GitHub:
+
+https://github.com/dbry/audio-resampler
 
 There's an option to cycle through the full possible ratio range in a
 sinusoidal pattern, starting at 1.0, and either going up (-c) or down
