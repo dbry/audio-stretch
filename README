@@ -6,6 +6,8 @@
 //      Distributed under the BSD Software License (see license.txt)      //
 ////////////////////////////////////////////////////////////////////////////
 
+New Python wrapper for audio-stretch: https://github.com/twardoch/audiostretchy
+
 From Wikipedia, the free encyclopedia:
 
     Time-domain harmonic scaling (TDHS) is a method for time-scale
